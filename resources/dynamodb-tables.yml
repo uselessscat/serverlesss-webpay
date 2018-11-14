@@ -1,0 +1,39 @@
+Resources:
+  PaymentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ${self:custom.paymentsTableName}
+      AttributeDefinitions:
+        - AttributeName: payment_id
+          AttributeType: S
+      #  - AttributeName: charge_id
+      #    AttributeType: S
+      #  - AttributeName: token_ws
+      #    AttributeType: S
+      KeySchema:
+        - AttributeName: payment_id
+          KeyType: HASH
+       # - AttributeName: charge_id
+       #   KeyType: RANGE
+       # - AttributeName: token_ws
+       #   KeyType: RANGE
+      ProvisionedThroughput:
+        ReadCapacityUnits: ${self:custom.tableThroughput}
+        WriteCapacityUnits: ${self:custom.tableThroughput}
+  ChargesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ${self:custom.chargesTableName}
+      AttributeDefinitions:
+        - AttributeName: charge_id
+          AttributeType: S
+        - AttributeName: user_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: charge_id
+          KeyType: HASH
+        - AttributeName: user_id
+          KeyType: RANGE
+      ProvisionedThroughput:
+        ReadCapacityUnits: ${self:custom.tableThroughput}
+        WriteCapacityUnits: ${self:custom.tableThroughput}

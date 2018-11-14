@@ -1,0 +1,55 @@
+service: Webpay
+
+plugins:
+  #- serverless-webpack
+  - serverless-offline
+
+custom:
+  stage: ${opt:stage, self:provider.stage}
+  paymentsTableName: ${self:custom.stage}-payments
+  chargesTableName: ${self:custom.stage}-charges
+  tableThroughputs:
+    prod: 5
+    default: 1
+  tableThroughput: ${self:custom.tableThroughputs.${self:custom.stage}, self:custom.tableThroughputs.default}
+  environment: ${file(env.yml):${self:custom.stage}, file(env.yml):default}
+
+provider:
+  name: aws
+  runtime: nodejs8.10
+  region: us-east-2
+  stage: dev
+
+  environment:
+    paymentsTableName: ${self:custom.paymentsTableName}
+    chargesTableName: ${self:custom.chargesTableName}
+
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - dynamodb:DescribeTable
+        - dynamodb:Query
+        - dynamodb:Scan
+        - dynamodb:GetItem
+        - dynamodb:PutItem
+        - dynamodb:UpdateItem
+        - dynamodb:DeleteItem
+      # Restrict our IAM role permissions to
+      # the specific table for the stage
+      Resource:
+        - "Fn::GetAtt": [ PaymentsTable, Arn ]
+        - "Fn::GetAtt": [ ChargesTable, Arn ]
+
+functions:
+  app:
+    handler: handler.handler
+    events:
+      - http: ANY /
+      - http: 'ANY {proxy+}'
+
+resources:
+  # DynamoDB
+  - ${file(resources/dynamodb-tables.yml)}
+  # Cognito
+  - ${file(resources/cognito-user-pool.yml)}
+  - ${file(resources/cognito-identity-pool.yml)}
