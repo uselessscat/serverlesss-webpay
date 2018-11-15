@@ -6,17 +6,13 @@ Resources:
       AttributeDefinitions:
         - AttributeName: payment_id
           AttributeType: S
-      #  - AttributeName: charge_id
-      #    AttributeType: S
-      #  - AttributeName: token_ws
-      #    AttributeType: S
+        - AttributeName: charge_id
+          AttributeType: S
       KeySchema:
         - AttributeName: payment_id
           KeyType: HASH
-       # - AttributeName: charge_id
-       #   KeyType: RANGE
-       # - AttributeName: token_ws
-       #   KeyType: RANGE
+        - AttributeName: charge_id
+          KeyType: RANGE
       ProvisionedThroughput:
         ReadCapacityUnits: ${self:custom.tableThroughput}
         WriteCapacityUnits: ${self:custom.tableThroughput}

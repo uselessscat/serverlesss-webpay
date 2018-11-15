@@ -8,6 +8,7 @@ const bodyParser = require('body-parser');
 const uuid = require('uuid');
 const cert = require('./certificates');
 
+const dynamoDb = new AWS.DynamoDB.DocumentClient();
 const onError = function (err, res) {
     console.log('ERROR', err)
     res.send(`
@@ -23,10 +24,7 @@ const onError = function (err, res) {
     `)
 };
 
-let transactions = {};
-let transactionsByToken = {};
 let app = express();
-
 app.use(bodyParser.urlencoded({ extended: true }));
 
 let wp = new WebPay({
@@ -56,9 +54,7 @@ app.get('/', (req, res) => {
 });
 
 app.post('/pagar', async (req, res) => {
-    const dynamoDb = new AWS.DynamoDB.DocumentClient();
-
-    // almacenar la fila en dynamo :: esto es temporal y deberia existir desde antes
+    // almacenar la fila en dynamo :: Este bloque no debe ir acá ::::::::::::::::::::::::::::::::::
     let charge_id = uuid.v1();
     let amount = req.body.amount;
     try {
@@ -74,6 +70,7 @@ app.post('/pagar', async (req, res) => {
     } catch (e) {
         res.send({ 'error': e })
     }
+    // :::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
     try {
         let payment_id = uuid.v1();
@@ -93,24 +90,24 @@ app.post('/pagar', async (req, res) => {
         // enviar peticion a webpay
         let url = 'http://' + req.get('host');
         let transaction = await wp.initTransaction({
-            buyOrder: payment_id.replace('-', '').substr(0, 26), // transbank max Length
+            buyOrder: payment_id.replace('-', '').substr(0, 26), // transbank max Length, posibilidades de hash collision?
             sessionId: req.sessionId,
-            returnURL: url + '/dev/verificar',
-            finalURL: url + '/dev/comprobante',
+            returnURL: url + '/dev/verificar?tid=' + payment_id + '&cid=' + charge_id,
+            finalURL: url + '/dev/comprobante?tid=' + payment_id + '&cid=' + charge_id,
             amount: amount
         });
 
-        // actualizar 
+        // TODO :: no es mejor usar solo el put de arriba? 
         let updateResult = await dynamoDb.update({
             TableName: process.env.paymentsTableName,
             Key: {
                 payment_id: payment_id,
                 charge_id: charge_id
             },
-            UpdateExpression: "SET token_ws_at = :token_ws_date, token_ws = :token_ws",
+            UpdateExpression: "SET token_ws_at = :tkd, token_ws = :tkval",
             ExpressionAttributeValues: {
-                ":token_ws_date": Date.now(),
-                ":token_ws": transaction.token || null
+                ":tkd": Date.now(),
+                ":tkval": transaction.token || null
             },
             ReturnValues: "ALL_NEW"
         }).promise();
@@ -122,46 +119,72 @@ app.post('/pagar', async (req, res) => {
 });
 
 app.post('/verificar', async (req, res) => {
+    let payment_id = req.query.tid;
+    let charge_id = req.query.cid;
+    let token_ws = req.body.token_ws;
 
-    let token = req.body.token_ws;
-    let transaction;
+    try {
+        let transactionResult = await wp.getTransactionResult(token_ws);
+        let acknowledge = await wp.acknowledgeTransaction(token_ws);
 
-    console.log('pre token', token);
-    wp.getTransactionResult(token).then((transactionResult) => {
-        transaction = transactionResult;
-        transactions[transaction.buyOrder] = transaction;
-        transactionsByToken[token] = transactions[transaction.buyOrder];
+        let updateResult = await dynamoDb.update({
+            TableName: process.env.paymentsTableName,
+            Key: {
+                payment_id: payment_id,
+                charge_id: charge_id
+            },
+            UpdateExpression: "SET transaction_result = :tr, acknoledge_result = :ar",
+            ExpressionAttributeValues: {
+                ":tr": transactionResult,
+                ":ar": acknowledge
+            },
+            ReturnValues: "ALL_NEW"
+        }).promise();
 
-        return wp.acknowledgeTransaction(token);
-
-    }).then((result2) => {
-        res.send(WebPay.getHtmlTransitionPage(transaction.urlRedirection, token));
-    }).catch(onError(res));
-
-});
+        res.send(WebPay.getHtmlTransitionPage(transactionResult.urlRedirection, token_ws));
+    } catch (e) {
+        res.send({ 'error': e })
+    }
+}); 
 
 app.post('/comprobante', async (req, res) => {
-    const transaction = transactionsByToken[req.body.token_ws];
-    let html = JSON.stringify(transaction);
+    let payment_id = req.query.tid;
+    let charge_id = req.query.cid;
+    let queryResult = {};
+
+    try {
+        queryResult = await dynamoDb.get({
+            TableName: process.env.paymentsTableName,
+            Key: {
+                payment_id: payment_id,
+                charge_id: charge_id
+            }
+        }).promise();
+    } catch (e) {
+        res.send({ 'error': e })
+    }
+
+    let html = JSON.stringify(queryResult);
     html += '<hr>';
-    html += '<form action="/dev/anular" method="post"><input type="hidden" name="buyOrden" value="' + transaction.buyOrder +
+    html += '<form action="/dev/anular" method="post"><input type="hidden" name="buyOrden" value="' + payment_id +
         '"><input type="submit" value="Anular"></form>'
     return res.send(html);
 });
 
 app.post('/anular', async (req, res) => {
-
-    const transaction = transactions[req.body.buyOrden];
-
-    wp.nullify({
-        authorizationCode: transaction.detailOutput.authorizationCode,
-        authorizedAmount: transaction.detailOutput.amount,
-        nullifyAmount: transaction.detailOutput.amount,
-        buyOrder: transaction.buyOrder
-    }).then((result) => {
-        console.log('anulación:', result);
-        return res.send('comprobante:' + JSON.stringify(transaction));
-    }).catch(onError(res));
+    /*
+        const transaction = transactions[req.body.buyOrden];
+    
+        wp.nullify({
+            authorizationCode: transaction.detailOutput.authorizationCode,
+            authorizedAmount: transaction.detailOutput.amount,
+            nullifyAmount: transaction.detailOutput.amount,
+            buyOrder: transaction.buyOrder
+        }).then((result) => {
+            console.log('anulación:', result);
+            return res.send('comprobante:' + JSON.stringify(transaction));
+        }).catch(onError(res));
+        */
 });
 
 module.exports.handler = serverless(app);
