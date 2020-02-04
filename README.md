@@ -1,3 +1,3 @@
 # Serverlesss webpay
 
-Implementación de webpay para aws con lambdas, Algún dia termino esto :(
+Implementación de webpay para AWS con Lambdas (usando el framework [Serverless](https://serverless.com/)), Algún dia termino esto :(
